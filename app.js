@@ -1047,9 +1047,9 @@ function cameraConstraints() {
     audio: false,
     video: {
       facingMode: { ideal: "environment" },
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
-      focusMode: { ideal: "continuous" },
+      width: { min: 1280, ideal: 1920 },
+      height: { min: 720, ideal: 1080 },
+      aspectRatio: { ideal: 16 / 9 },
       frameRate: { ideal: 30, max: 60 }
     }
   };
@@ -1107,14 +1107,16 @@ async function detectBarcodeFromPreview(previewEl, detector, tries = 4) {
 
 async function detectBarcodeFromCanvas(previewEl, detector, tries = 3) {
   const canvas = document.createElement("canvas");
-  const width = previewEl.videoWidth || 1280;
-  const height = previewEl.videoHeight || 720;
+  const width = previewEl.videoWidth || 1920;
+  const height = previewEl.videoHeight || 1080;
   canvas.width = width;
   canvas.height = height;
   const context = canvas.getContext("2d", { willReadFrequently: true });
   for (let attempt = 0; attempt < tries; attempt += 1) {
     try {
+      context.filter = attempt === 0 ? "contrast(1.4) brightness(1.05)" : "contrast(1.7) brightness(1.1) saturate(0)";
       context.drawImage(previewEl, 0, 0, width, height);
+      context.filter = "none";
       const codes = await detector.detect(canvas);
       if (codes.length) return pickBestBarcode(codes);
     } catch (error) {
@@ -1154,7 +1156,9 @@ async function watchContinuousBarcodeCandidate() {
       let code = "";
       try {
         const codes = await state.continuousScanDetector.detect(elements.scannerPreview);
-        code = codes.length ? pickBestBarcode(codes) : "";
+        code = codes.length
+          ? pickBestBarcode(codes)
+          : await detectBarcodeFromCanvas(elements.scannerPreview, state.continuousScanDetector, 1);
       } catch (error) {
         code = "";
       }
@@ -1184,7 +1188,7 @@ function watchContinuousBarcodeCandidateWithZxing() {
   }
 }
 
-async function waitForContinuousStableCode(timeoutMs = 700) {
+async function waitForContinuousStableCode(timeoutMs = 1200) {
   const startedAt = Date.now();
   while (state.continuousScanning && !state.continuousStableCode && Date.now() - startedAt < timeoutMs) {
     await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -1205,7 +1209,7 @@ function createZxingReader() {
     ]);
     hints.set(window.ZXing.DecodeHintType.TRY_HARDER, true);
   }
-  return new ZXing.BrowserMultiFormatReader(hints, 40);
+  return new ZXing.BrowserMultiFormatReader(hints, 30);
 }
 
 async function waitForZxing(timeoutMs = 2500) {
@@ -1248,8 +1252,11 @@ async function scanBarcodeToInput(targetInput, messageEl, previewEl, onCode) {
     showScanMessage(messageEl, "JANコードをカメラに向けてください。");
 
     stream = await prepareScannerStream(previewEl);
-    let code = await scanWithZxing(previewEl, 9000);
-    if (!code) code = await scanWithBarcodeDetector(previewEl, 3500);
+    let code = "";
+    if ("BarcodeDetector" in window) {
+      code = await scanWithBarcodeDetector(previewEl, 7000);
+    }
+    if (!code) code = await scanWithZxing(previewEl, 9000);
 
     if (code) {
       targetInput.value = code;
