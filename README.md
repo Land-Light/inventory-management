@@ -25,7 +25,6 @@ PowerShellでこのフォルダを開き、次を実行します。
 - `index.html`
 - `styles.css`
 - `app.js`
-- `zxing.min.js`
 - `supabase-config.js`
 - `.nojekyll`
 

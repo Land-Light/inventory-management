@@ -33,14 +33,8 @@ const state = {
   continuousStableCode: "",
   continuousStableAt: 0,
   continuousBarcodeDetectorRunning: false,
-  continuousZxingRunning: false,
-  continuousScanTrack: null
+  continuousZxingRunning: false
 };
-
-let _scanCanvas = null;
-let _scanCtx = null;
-let _zxingCanvas = null;
-let _zxingCtx = null;
 
 const $ = (selector) => document.querySelector(selector);
 const localKey = (roomId) => `inventory-room:${roomId}`;
@@ -1053,8 +1047,9 @@ function cameraConstraints() {
     audio: false,
     video: {
       facingMode: { ideal: "environment" },
-      width: { ideal: 1920 },
-      height: { ideal: 1080 },
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+      focusMode: { ideal: "continuous" },
       frameRate: { ideal: 30, max: 60 }
     }
   };
@@ -1068,83 +1063,27 @@ async function prepareScannerStream(previewEl) {
       resolve();
       return;
     }
-    previewEl.addEventListener("loadedmetadata", resolve, { once: true });
+    previewEl.onloadedmetadata = resolve;
   });
   await previewEl.play();
-  if (previewEl.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
-    await Promise.race([
-      new Promise((resolve) => previewEl.addEventListener("canplay", resolve, { once: true })),
-      new Promise((resolve) => setTimeout(resolve, 1500))
-    ]);
-  }
-
-  if (!previewEl.videoWidth) {
-    await Promise.race([
-      new Promise((resolve) => {
-        const waitForFrame = () => {
-          if (previewEl.videoWidth > 0) { resolve(); return; }
-          requestAnimationFrame(waitForFrame);
-        };
-        requestAnimationFrame(waitForFrame);
-      }),
-      wait(2000)
-    ]);
-  }
 
   const track = stream.getVideoTracks()[0];
   const capabilities = track?.getCapabilities?.() || {};
   const advanced = [];
   if (capabilities.focusMode?.includes?.("continuous")) advanced.push({ focusMode: "continuous" });
-  if (capabilities.exposureMode?.includes?.("continuous")) advanced.push({ exposureMode: "continuous" });
-  if (capabilities.whiteBalanceMode?.includes?.("continuous")) advanced.push({ whiteBalanceMode: "continuous" });
+  if (capabilities.torch) advanced.push({ torch: true });
   if (advanced.length) {
-    await Promise.race([
-      track.applyConstraints({ advanced }).catch(() => null),
-      wait(500)
-    ]);
+    track.applyConstraints({ advanced }).catch(() => null);
   }
-  await wait(400);
   return stream;
 }
 
-async function scanWithBarcodeDetector(previewEl, timeoutMs = 4500, track = null) {
-  if (!("BarcodeDetector" in window)) return "";
+async function scanWithBarcodeDetector(previewEl) {
   const detector = new BarcodeDetector({ formats: BARCODE_FORMATS });
-  const imageCapture = ("ImageCapture" in window && track) ? new ImageCapture(track) : null;
   const startedAt = Date.now();
-  let frame = 0;
-  while (Date.now() - startedAt < timeoutMs) {
-    frame += 1;
-    if (!previewEl.videoWidth || !previewEl.videoHeight) {
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-      continue;
-    }
-    let codes = [];
-    try {
-      if (imageCapture) {
-        let bitmap = null;
-        try {
-          bitmap = await imageCapture.grabFrame();
-          codes = await detector.detect(bitmap);
-          if (!codes.length) {
-            const bitmapCode = await detectBarcodeFromBitmap(bitmap, detector);
-            if (bitmapCode) return bitmapCode;
-          }
-        } catch (_) {
-          codes = await detector.detect(previewEl).catch(() => []);
-        } finally {
-          bitmap?.close();
-        }
-      } else {
-        codes = await detector.detect(previewEl);
-      }
-    } catch (_) {
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-      continue;
-    }
+  while (Date.now() - startedAt < 15000) {
+    const codes = await detector.detect(previewEl);
     if (codes.length) return pickBestBarcode(codes);
-    const canvasCode = await detectBarcodeFromCanvas(previewEl, detector, frame % 5 === 0 ? 3 : 1);
-    if (canvasCode) return canvasCode;
     await new Promise((resolve) => requestAnimationFrame(resolve));
   }
   return "";
@@ -1152,94 +1091,9 @@ async function scanWithBarcodeDetector(previewEl, timeoutMs = 4500, track = null
 
 async function detectBarcodeFromPreview(previewEl, detector, tries = 4) {
   for (let attempt = 0; attempt < tries; attempt += 1) {
-    try {
-      const codes = await detector.detect(previewEl);
-      if (codes.length) return pickBestBarcode(codes);
-    } catch (_) {}
+    const codes = await detector.detect(previewEl);
+    if (codes.length) return pickBestBarcode(codes);
     await new Promise((resolve) => requestAnimationFrame(resolve));
-  }
-  return "";
-}
-
-async function detectBarcodeFromCanvas(previewEl, detector, tries = 3) {
-  const width = previewEl.videoWidth;
-  const height = previewEl.videoHeight;
-  if (!width || !height) return "";
-  if (!_scanCanvas) {
-    _scanCanvas = document.createElement("canvas");
-    _scanCtx = _scanCanvas.getContext("2d", { willReadFrequently: true });
-  }
-  if (_scanCanvas.width !== width) _scanCanvas.width = width;
-  if (_scanCanvas.height !== height) _scanCanvas.height = height;
-  for (let attempt = 0; attempt < tries; attempt += 1) {
-    try {
-      if (attempt < 2) {
-        _scanCtx.filter = attempt === 0 ? "contrast(1.4) brightness(1.05)" : "contrast(1.7) brightness(1.1) saturate(0)";
-        _scanCtx.drawImage(previewEl, 0, 0, width, height);
-      } else {
-        _scanCtx.filter = "contrast(1.5) brightness(1.05)";
-        _scanCtx.drawImage(previewEl, width * 0.25, height * 0.25, width * 0.5, height * 0.5, 0, 0, width, height);
-      }
-      _scanCtx.filter = "none";
-      const codes = await detector.detect(_scanCanvas);
-      if (codes.length) return pickBestBarcode(codes);
-    } catch (_) {
-      // continue to next attempt
-    }
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-  }
-  return "";
-}
-
-async function detectBarcodeFromBitmap(bitmap, detector) {
-  const { width, height } = bitmap;
-  if (!width || !height) return "";
-  if (!_scanCanvas) {
-    _scanCanvas = document.createElement("canvas");
-    _scanCtx = _scanCanvas.getContext("2d", { willReadFrequently: true });
-  }
-  const scale = Math.min(1, 1920 / Math.max(width, height));
-  const w = Math.round(width * scale);
-  const h = Math.round(height * scale);
-  if (_scanCanvas.width !== w) _scanCanvas.width = w;
-  if (_scanCanvas.height !== h) _scanCanvas.height = h;
-  for (const [filter, sx, sy, sw, sh] of [
-    ["contrast(1.4) brightness(1.05)", 0, 0, width, height],
-    ["contrast(1.7) brightness(1.1) saturate(0)", 0, 0, width, height],
-    ["contrast(1.5) brightness(1.05)", width * 0.25, height * 0.25, width * 0.5, height * 0.5]
-  ]) {
-    try {
-      _scanCtx.filter = filter;
-      _scanCtx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, w, h);
-      _scanCtx.filter = "none";
-      const codes = await detector.detect(_scanCanvas);
-      if (codes.length) return pickBestBarcode(codes);
-    } catch (_) {}
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-  }
-  return "";
-}
-
-function tryZxingDecodeCanvas(reader, previewEl) {
-  const width = previewEl.videoWidth;
-  const height = previewEl.videoHeight;
-  if (!width || !height) return "";
-  if (!_zxingCanvas) {
-    _zxingCanvas = document.createElement("canvas");
-    _zxingCtx = _zxingCanvas.getContext("2d", { willReadFrequently: true });
-  }
-  if (_zxingCanvas.width !== width) _zxingCanvas.width = width;
-  if (_zxingCanvas.height !== height) _zxingCanvas.height = height;
-  for (const filter of ["none", "contrast(1.4) brightness(1.05)", "contrast(1.7) brightness(1.1) saturate(0)"]) {
-    try {
-      _zxingCtx.filter = filter;
-      _zxingCtx.drawImage(previewEl, 0, 0, width, height);
-      _zxingCtx.filter = "none";
-    } catch (_) { continue; }
-    let r = null;
-    try { r = reader.decodeFromCanvas?.(_zxingCanvas) ?? null; } catch (_) {}
-    if (!r) { try { r = reader.decode?.(_zxingCanvas) ?? null; } catch (_) {} }
-    if (r) return normalizeScannedCode(r.getText());
   }
   return "";
 }
@@ -1247,8 +1101,7 @@ function tryZxingDecodeCanvas(reader, previewEl) {
 async function detectContinuousCodeWithBarcodeDetector() {
   const detector = state.continuousScanDetector;
   if (!detector) return "";
-  return await detectBarcodeFromPreview(elements.scannerPreview, detector, 8) ||
-    await detectBarcodeFromCanvas(elements.scannerPreview, detector, 4);
+  return await detectBarcodeFromPreview(elements.scannerPreview, detector, 4);
 }
 
 function rememberContinuousCode(code) {
@@ -1259,7 +1112,7 @@ function rememberContinuousCode(code) {
     state.continuousCandidateCode = code;
     state.continuousCandidateHits = 1;
   }
-  if (state.continuousCandidateHits >= 1) {
+  if (state.continuousCandidateHits >= 2) {
     state.continuousStableCode = code;
     state.continuousStableAt = Date.now();
   }
@@ -1268,31 +1121,12 @@ function rememberContinuousCode(code) {
 async function watchContinuousBarcodeCandidate() {
   if (state.continuousBarcodeDetectorRunning) return;
   state.continuousBarcodeDetectorRunning = true;
-  let canvasFrame = 0;
-  const imageCapture = ("ImageCapture" in window && state.continuousScanTrack)
-    ? new ImageCapture(state.continuousScanTrack)
-    : null;
   try {
     while (state.continuousScanning && state.continuousScanDetector) {
-      canvasFrame += 1;
       let code = "";
       try {
         const codes = await state.continuousScanDetector.detect(elements.scannerPreview);
         code = codes.length ? pickBestBarcode(codes) : "";
-        if (!code && canvasFrame % 3 === 0) {
-          code = await detectBarcodeFromCanvas(elements.scannerPreview, state.continuousScanDetector, 1);
-        }
-        if (!code && imageCapture && canvasFrame % 12 === 0) {
-          let bitmap = null;
-          try {
-            bitmap = await imageCapture.grabFrame();
-            const bitmapCodes = await state.continuousScanDetector.detect(bitmap);
-            code = bitmapCodes.length ? pickBestBarcode(bitmapCodes) : "";
-            if (!code) code = await detectBarcodeFromBitmap(bitmap, state.continuousScanDetector);
-          } catch (_) {} finally {
-            bitmap?.close();
-          }
-        }
       } catch (error) {
         code = "";
       }
@@ -1308,27 +1142,21 @@ async function watchContinuousBarcodeCandidate() {
 
 function watchContinuousBarcodeCandidateWithZxing() {
   if (!state.continuousZxingReader?.decodeFromVideoElementContinuously) {
-    showScanMessage(elements.scanMessage, "このブラウザでは連続読取を開始できません。ページを再読み込みしてもう一度試してください。");
+    showScanMessage(elements.scanMessage, "このSafariでは連続読取を開始できません。ブラウザを更新してもう一度試してください。");
     return;
   }
   state.continuousZxingRunning = true;
-  let zxingFrame = 0;
   try {
     state.continuousZxingReader.decodeFromVideoElementContinuously(elements.scannerPreview, (result) => {
-      if (!state.continuousScanning) return;
-      if (result) {
-        rememberContinuousCode(normalizeScannedCode(result.getText()));
-      } else if (++zxingFrame % 5 === 0 && state.continuousZxingReader) {
-        const code = tryZxingDecodeCanvas(state.continuousZxingReader, elements.scannerPreview);
-        if (code) rememberContinuousCode(code);
-      }
+      if (!state.continuousScanning || !result) return;
+      rememberContinuousCode(normalizeScannedCode(result.getText()));
     });
   } catch (error) {
     state.continuousZxingRunning = false;
   }
 }
 
-async function waitForContinuousStableCode(timeoutMs = 1200) {
+async function waitForContinuousStableCode(timeoutMs = 700) {
   const startedAt = Date.now();
   while (state.continuousScanning && !state.continuousStableCode && Date.now() - startedAt < timeoutMs) {
     await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -1338,18 +1166,7 @@ async function waitForContinuousStableCode(timeoutMs = 1200) {
 
 function createZxingReader() {
   if (!window.ZXing?.BrowserMultiFormatReader) return null;
-  const hints = new Map();
-  if (window.ZXing.DecodeHintType && window.ZXing.BarcodeFormat) {
-    hints.set(window.ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-      window.ZXing.BarcodeFormat.EAN_13,
-      window.ZXing.BarcodeFormat.EAN_8,
-      window.ZXing.BarcodeFormat.UPC_A,
-      window.ZXing.BarcodeFormat.UPC_E,
-      window.ZXing.BarcodeFormat.CODE_128
-    ]);
-    hints.set(window.ZXing.DecodeHintType.TRY_HARDER, true);
-  }
-  return new ZXing.BrowserMultiFormatReader(hints, 30);
+  return new ZXing.BrowserMultiFormatReader();
 }
 
 async function waitForZxing(timeoutMs = 2500) {
@@ -1364,42 +1181,18 @@ async function scanWithZxing(previewEl, timeoutMs = 10000) {
   if (!(await waitForZxing())) return "";
   const reader = createZxingReader();
   if (!reader) return "";
-  const decode = reader.decodeOnceFromVideoElement || reader.decodeFromVideoElement;
-  if (!decode) { reader.reset(); return ""; }
-  let settled = false;
-  const result = await new Promise((resolve) => {
-    const finish = (code) => { if (!settled) { settled = true; resolve(code); } };
-    setTimeout(() => finish(""), timeoutMs);
-    decode.call(reader, previewEl)
-      .then((r) => finish(r ? normalizeScannedCode(r.getText()) : ""))
-      .catch(() => finish(""));
-    (async () => {
-      await new Promise((r) => setTimeout(r, 120));
-      while (!settled) {
-        const code = tryZxingDecodeCanvas(reader, previewEl);
-        if (code) { finish(code); break; }
-        await new Promise((r) => setTimeout(r, 120));
-      }
-    })();
-  });
-  settled = true;
-  reader.reset();
-  return result;
-}
-
-async function firstNonEmpty(...promises) {
-  return new Promise((resolve) => {
-    let settled = false;
-    let pending = promises.length;
-    for (const p of promises) {
-      Promise.resolve(p)
-        .then((code) => {
-          if (code && !settled) { settled = true; resolve(code); }
-          if (!--pending && !settled) resolve("");
-        })
-        .catch(() => { if (!--pending && !settled) resolve(""); });
-    }
-  });
+  try {
+    const timeout = new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs));
+    const result = await Promise.race([
+      reader.decodeOnceFromVideoDevice(undefined, previewEl),
+      timeout
+    ]);
+    return result ? normalizeScannedCode(result.getText()) : "";
+  } catch (error) {
+    return "";
+  } finally {
+    reader.reset();
+  }
 }
 
 async function scanBarcodeToInput(targetInput, messageEl, previewEl, onCode) {
@@ -1413,16 +1206,12 @@ async function scanBarcodeToInput(targetInput, messageEl, previewEl, onCode) {
     previewEl.hidden = false;
     showScanMessage(messageEl, "JANコードをカメラに向けてください。");
 
-    stream = await prepareScannerStream(previewEl);
-    const track = stream.getVideoTracks()[0];
-    const hasBD = "BarcodeDetector" in window;
     let code = "";
-    if (hasBD) {
-      code = await scanWithBarcodeDetector(previewEl, 9000, track);
-    }
-    if (!code) {
-      const hasZxing = await waitForZxing();
-      if (hasZxing) code = await scanWithZxing(previewEl, 9000);
+    if ("BarcodeDetector" in window) {
+      stream = await prepareScannerStream(previewEl);
+      code = await scanWithBarcodeDetector(previewEl);
+    } else {
+      code = await scanWithZxing(previewEl);
     }
 
     if (code) {
@@ -1489,11 +1278,11 @@ async function startContinuousCountScan() {
 
   try {
     state.continuousScanStream = await prepareScannerStream(elements.scannerPreview);
-    state.continuousScanTrack = state.continuousScanStream.getVideoTracks()[0] || null;
     if (canUseBarcodeDetector) {
       state.continuousScanDetector = new BarcodeDetector({ formats: BARCODE_FORMATS });
       watchContinuousBarcodeCandidate();
-    } else if (canUseZxing) {
+    }
+    if (canUseZxing) {
       state.continuousZxingReader = createZxingReader();
       watchContinuousBarcodeCandidateWithZxing();
     }
@@ -1521,9 +1310,6 @@ async function readContinuousCountScan() {
       if (!code && state.continuousScanDetector) {
         code = await detectContinuousCodeWithBarcodeDetector();
       }
-      if (!code && state.continuousZxingReader) {
-        code = tryZxingDecodeCanvas(state.continuousZxingReader, elements.scannerPreview);
-      }
       if (code) {
         rememberContinuousCode(code);
       }
@@ -1542,9 +1328,6 @@ async function readContinuousCountScan() {
       elements.countSearch.dispatchEvent(new Event("input", { bubbles: true }));
       const saved = await saveCountFromInputs();
       if (saved) {
-        state.continuousStableCode = "";
-        state.continuousCandidateCode = "";
-        state.continuousCandidateHits = 0;
         state.continuousReadCount += 1;
         showScanMessage(elements.scanMessage, `読取 ${state.continuousReadCount}件目: ${code}`);
       }
@@ -1561,7 +1344,6 @@ function stopContinuousCountScan({ silent = false } = {}) {
   state.continuousReadQueue = 0;
   state.continuousReadProcessing = false;
   state.continuousScanDetector = null;
-  state.continuousScanTrack = null;
   if (state.continuousZxingReader) {
     state.continuousZxingReader.reset();
     state.continuousZxingReader = null;
