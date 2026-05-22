@@ -1115,8 +1115,10 @@ async function scanWithBarcodeDetector(previewEl, timeoutMs = 4500) {
 
 async function detectBarcodeFromPreview(previewEl, detector, tries = 4) {
   for (let attempt = 0; attempt < tries; attempt += 1) {
-    const codes = await detector.detect(previewEl);
-    if (codes.length) return pickBestBarcode(codes);
+    try {
+      const codes = await detector.detect(previewEl);
+      if (codes.length) return pickBestBarcode(codes);
+    } catch (_) {}
     await new Promise((resolve) => requestAnimationFrame(resolve));
   }
   return "";
@@ -1225,7 +1227,7 @@ async function watchContinuousBarcodeCandidate() {
 
 function watchContinuousBarcodeCandidateWithZxing() {
   if (!state.continuousZxingReader?.decodeFromVideoElementContinuously) {
-    showScanMessage(elements.scanMessage, "このSafariでは連続読取を開始できません。ブラウザを更新してもう一度試してください。");
+    showScanMessage(elements.scanMessage, "このブラウザでは連続読取を開始できません。ページを再読み込みしてもう一度試してください。");
     return;
   }
   state.continuousZxingRunning = true;
@@ -1441,6 +1443,9 @@ async function readContinuousCountScan() {
       if (!code && state.continuousScanDetector) {
         code = await detectContinuousCodeWithBarcodeDetector();
       }
+      if (!code && state.continuousZxingReader) {
+        code = tryZxingDecodeCanvas(state.continuousZxingReader, elements.scannerPreview);
+      }
       if (code) {
         rememberContinuousCode(code);
       }
@@ -1459,6 +1464,9 @@ async function readContinuousCountScan() {
       elements.countSearch.dispatchEvent(new Event("input", { bubbles: true }));
       const saved = await saveCountFromInputs();
       if (saved) {
+        state.continuousStableCode = "";
+        state.continuousCandidateCode = "";
+        state.continuousCandidateHits = 0;
         state.continuousReadCount += 1;
         showScanMessage(elements.scanMessage, `読取 ${state.continuousReadCount}件目: ${code}`);
       }
