@@ -1141,6 +1141,28 @@ async function detectBarcodeFromCanvas(previewEl, detector, tries = 3) {
   return "";
 }
 
+function tryZxingDecodeCanvas(reader, previewEl) {
+  const width = previewEl.videoWidth;
+  const height = previewEl.videoHeight;
+  if (!width || !height) return "";
+  if (!_scanCanvas) {
+    _scanCanvas = document.createElement("canvas");
+    _scanCtx = _scanCanvas.getContext("2d", { willReadFrequently: true });
+  }
+  if (_scanCanvas.width !== width) _scanCanvas.width = width;
+  if (_scanCanvas.height !== height) _scanCanvas.height = height;
+  for (const filter of ["contrast(1.4) brightness(1.05)", "contrast(1.7) brightness(1.1) saturate(0)"]) {
+    try {
+      _scanCtx.filter = filter;
+      _scanCtx.drawImage(previewEl, 0, 0, width, height);
+      _scanCtx.filter = "none";
+      const r = reader.decodeFromCanvas?.(_scanCanvas) ?? reader.decode?.(_scanCanvas);
+      if (r) return normalizeScannedCode(r.getText());
+    } catch (e) { /* NotFoundException is expected */ }
+  }
+  return "";
+}
+
 async function detectContinuousCodeWithBarcodeDetector() {
   const detector = state.continuousScanDetector;
   if (!detector) return "";
@@ -1194,10 +1216,16 @@ function watchContinuousBarcodeCandidateWithZxing() {
     return;
   }
   state.continuousZxingRunning = true;
+  let zxingFrame = 0;
   try {
     state.continuousZxingReader.decodeFromVideoElementContinuously(elements.scannerPreview, (result) => {
-      if (!state.continuousScanning || !result) return;
-      rememberContinuousCode(normalizeScannedCode(result.getText()));
+      if (!state.continuousScanning) return;
+      if (result) {
+        rememberContinuousCode(normalizeScannedCode(result.getText()));
+      } else if (++zxingFrame % 5 === 0 && state.continuousZxingReader) {
+        const code = tryZxingDecodeCanvas(state.continuousZxingReader, elements.scannerPreview);
+        if (code) rememberContinuousCode(code);
+      }
     });
   } catch (error) {
     state.continuousZxingRunning = false;
@@ -1241,19 +1269,41 @@ async function scanWithZxing(previewEl, timeoutMs = 10000) {
   const reader = createZxingReader();
   if (!reader) return "";
   const decode = reader.decodeOnceFromVideoElement || reader.decodeFromVideoElement;
-  if (!decode) return "";
-  try {
-    const timeout = new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs));
-    const result = await Promise.race([
-      decode.call(reader, previewEl),
-      timeout
-    ]);
-    return result ? normalizeScannedCode(result.getText()) : "";
-  } catch (error) {
-    return "";
-  } finally {
-    reader.reset();
-  }
+  if (!decode) { reader.reset(); return ""; }
+  let settled = false;
+  const result = await new Promise((resolve) => {
+    const finish = (code) => { if (!settled) { settled = true; resolve(code); } };
+    setTimeout(() => finish(""), timeoutMs);
+    decode.call(reader, previewEl)
+      .then((r) => finish(r ? normalizeScannedCode(r.getText()) : ""))
+      .catch(() => finish(""));
+    (async () => {
+      await new Promise((r) => setTimeout(r, 250));
+      while (!settled) {
+        const code = tryZxingDecodeCanvas(reader, previewEl);
+        if (code) { finish(code); break; }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    })();
+  });
+  settled = true;
+  reader.reset();
+  return result;
+}
+
+async function firstNonEmpty(...promises) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let pending = promises.length;
+    for (const p of promises) {
+      Promise.resolve(p)
+        .then((code) => {
+          if (code && !settled) { settled = true; resolve(code); }
+          if (!--pending && !settled) resolve("");
+        })
+        .catch(() => { if (!--pending && !settled) resolve(""); });
+    }
+  });
 }
 
 async function scanBarcodeToInput(targetInput, messageEl, previewEl, onCode) {
@@ -1268,11 +1318,19 @@ async function scanBarcodeToInput(targetInput, messageEl, previewEl, onCode) {
     showScanMessage(messageEl, "JANコードをカメラに向けてください。");
 
     stream = await prepareScannerStream(previewEl);
+    const hasBD = "BarcodeDetector" in window;
+    const hasZxing = await waitForZxing();
     let code = "";
-    if ("BarcodeDetector" in window) {
-      code = await scanWithBarcodeDetector(previewEl, 7000);
+    if (hasBD && hasZxing) {
+      code = await firstNonEmpty(
+        scanWithBarcodeDetector(previewEl, 10000),
+        scanWithZxing(previewEl, 10000)
+      );
+    } else if (hasBD) {
+      code = await scanWithBarcodeDetector(previewEl, 10000);
+    } else if (hasZxing) {
+      code = await scanWithZxing(previewEl, 10000);
     }
-    if (!code) code = await scanWithZxing(previewEl, 9000);
 
     if (code) {
       targetInput.value = code;
