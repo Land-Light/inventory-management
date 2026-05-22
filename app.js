@@ -36,6 +36,9 @@ const state = {
   continuousZxingRunning: false
 };
 
+let _scanCanvas = null;
+let _scanCtx = null;
+
 const $ = (selector) => document.querySelector(selector);
 const localKey = (roomId) => `inventory-room:${roomId}`;
 const deviceKey = "inventory-device-id";
@@ -1070,6 +1073,11 @@ async function prepareScannerStream(previewEl) {
   const capabilities = track?.getCapabilities?.() || {};
   const advanced = [];
   if (capabilities.focusMode?.includes?.("continuous")) advanced.push({ focusMode: "continuous" });
+  if (capabilities.exposureMode?.includes?.("continuous")) advanced.push({ exposureMode: "continuous" });
+  if (capabilities.whiteBalanceMode?.includes?.("continuous")) advanced.push({ whiteBalanceMode: "continuous" });
+  if (capabilities.zoom && capabilities.zoom.max > 1.2) {
+    advanced.push({ zoom: Math.min(1.5, capabilities.zoom.max) });
+  }
   if (capabilities.torch) advanced.push({ torch: true });
   if (advanced.length) {
     track.applyConstraints({ advanced }).catch(() => null);
@@ -1105,18 +1113,25 @@ async function detectBarcodeFromPreview(previewEl, detector, tries = 4) {
 }
 
 async function detectBarcodeFromCanvas(previewEl, detector, tries = 3) {
-  const canvas = document.createElement("canvas");
   const width = previewEl.videoWidth || 1920;
   const height = previewEl.videoHeight || 1080;
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!_scanCanvas) {
+    _scanCanvas = document.createElement("canvas");
+    _scanCtx = _scanCanvas.getContext("2d", { willReadFrequently: true });
+  }
+  if (_scanCanvas.width !== width) _scanCanvas.width = width;
+  if (_scanCanvas.height !== height) _scanCanvas.height = height;
   for (let attempt = 0; attempt < tries; attempt += 1) {
     try {
-      context.filter = attempt === 0 ? "contrast(1.4) brightness(1.05)" : "contrast(1.7) brightness(1.1) saturate(0)";
-      context.drawImage(previewEl, 0, 0, width, height);
-      context.filter = "none";
-      const codes = await detector.detect(canvas);
+      if (attempt < 2) {
+        _scanCtx.filter = attempt === 0 ? "contrast(1.4) brightness(1.05)" : "contrast(1.7) brightness(1.1) saturate(0)";
+        _scanCtx.drawImage(previewEl, 0, 0, width, height);
+      } else {
+        _scanCtx.filter = "contrast(1.5) brightness(1.05)";
+        _scanCtx.drawImage(previewEl, width * 0.25, height * 0.25, width * 0.5, height * 0.5, 0, 0, width, height);
+      }
+      _scanCtx.filter = "none";
+      const codes = await detector.detect(_scanCanvas);
       if (codes.length) return pickBestBarcode(codes);
     } catch (error) {
       return "";
@@ -1141,7 +1156,7 @@ function rememberContinuousCode(code) {
     state.continuousCandidateCode = code;
     state.continuousCandidateHits = 1;
   }
-  if (state.continuousCandidateHits >= 2) {
+  if (state.continuousCandidateHits >= 1) {
     state.continuousStableCode = code;
     state.continuousStableAt = Date.now();
   }
@@ -1150,12 +1165,16 @@ function rememberContinuousCode(code) {
 async function watchContinuousBarcodeCandidate() {
   if (state.continuousBarcodeDetectorRunning) return;
   state.continuousBarcodeDetectorRunning = true;
+  let canvasFrame = 0;
   try {
     while (state.continuousScanning && state.continuousScanDetector) {
       let code = "";
       try {
         const codes = await state.continuousScanDetector.detect(elements.scannerPreview);
         code = codes.length ? pickBestBarcode(codes) : "";
+        if (!code && ++canvasFrame % 5 === 0) {
+          code = await detectBarcodeFromCanvas(elements.scannerPreview, state.continuousScanDetector, 1);
+        }
       } catch (error) {
         code = "";
       }
@@ -1185,7 +1204,7 @@ function watchContinuousBarcodeCandidateWithZxing() {
   }
 }
 
-async function waitForContinuousStableCode(timeoutMs = 1200) {
+async function waitForContinuousStableCode(timeoutMs = 800) {
   const startedAt = Date.now();
   while (state.continuousScanning && !state.continuousStableCode && Date.now() - startedAt < timeoutMs) {
     await new Promise((resolve) => requestAnimationFrame(resolve));
