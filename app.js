@@ -1067,7 +1067,7 @@ async function prepareScannerStream(previewEl) {
       resolve();
       return;
     }
-    previewEl.onloadedmetadata = resolve;
+    previewEl.addEventListener("loadedmetadata", resolve, { once: true });
   });
   await previewEl.play();
   if (previewEl.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
@@ -1083,24 +1083,35 @@ async function prepareScannerStream(previewEl) {
   if (capabilities.focusMode?.includes?.("continuous")) advanced.push({ focusMode: "continuous" });
   if (capabilities.exposureMode?.includes?.("continuous")) advanced.push({ exposureMode: "continuous" });
   if (capabilities.whiteBalanceMode?.includes?.("continuous")) advanced.push({ whiteBalanceMode: "continuous" });
-  if (capabilities.zoom && capabilities.zoom.max > 1.2) {
-    advanced.push({ zoom: Math.min(1.5, capabilities.zoom.max) });
-  }
-  if (capabilities.torch) advanced.push({ torch: true });
   if (advanced.length) {
-    track.applyConstraints({ advanced }).catch(() => null);
+    await Promise.race([
+      track.applyConstraints({ advanced }).catch(() => null),
+      wait(500)
+    ]);
   }
+  await wait(400);
   return stream;
 }
 
-async function scanWithBarcodeDetector(previewEl, timeoutMs = 4500) {
+async function scanWithBarcodeDetector(previewEl, timeoutMs = 4500, track = null) {
   if (!("BarcodeDetector" in window)) return "";
   const detector = new BarcodeDetector({ formats: BARCODE_FORMATS });
+  const imageCapture = ("ImageCapture" in window && track) ? new ImageCapture(track) : null;
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     let codes = [];
     try {
-      codes = await detector.detect(previewEl);
+      if (imageCapture) {
+        try {
+          const bitmap = await imageCapture.grabFrame();
+          codes = await detector.detect(bitmap);
+          bitmap.close();
+        } catch (_) {
+          codes = await detector.detect(previewEl);
+        }
+      } else {
+        codes = await detector.detect(previewEl);
+      }
     } catch (_) {
       await new Promise((resolve) => requestAnimationFrame(resolve));
       continue;
@@ -1333,18 +1344,15 @@ async function scanBarcodeToInput(targetInput, messageEl, previewEl, onCode) {
     showScanMessage(messageEl, "JANコードをカメラに向けてください。");
 
     stream = await prepareScannerStream(previewEl);
+    const track = stream.getVideoTracks()[0];
     const hasBD = "BarcodeDetector" in window;
-    const hasZxing = await waitForZxing();
     let code = "";
-    if (hasBD && hasZxing) {
-      code = await firstNonEmpty(
-        scanWithBarcodeDetector(previewEl, 10000),
-        scanWithZxing(previewEl, 10000)
-      );
-    } else if (hasBD) {
-      code = await scanWithBarcodeDetector(previewEl, 10000);
-    } else if (hasZxing) {
-      code = await scanWithZxing(previewEl, 10000);
+    if (hasBD) {
+      code = await scanWithBarcodeDetector(previewEl, 9000, track);
+    }
+    if (!code) {
+      const hasZxing = await waitForZxing();
+      if (hasZxing) code = await scanWithZxing(previewEl, 9000);
     }
 
     if (code) {
@@ -1414,8 +1422,7 @@ async function startContinuousCountScan() {
     if (canUseBarcodeDetector) {
       state.continuousScanDetector = new BarcodeDetector({ formats: BARCODE_FORMATS });
       watchContinuousBarcodeCandidate();
-    }
-    if (canUseZxing) {
+    } else if (canUseZxing) {
       state.continuousZxingReader = createZxingReader();
       watchContinuousBarcodeCandidateWithZxing();
     }
