@@ -38,6 +38,8 @@ const state = {
 
 let _scanCanvas = null;
 let _scanCtx = null;
+let _zxingCanvas = null;
+let _zxingCtx = null;
 
 const $ = (selector) => document.querySelector(selector);
 const localKey = (roomId) => `inventory-room:${roomId}`;
@@ -1068,6 +1070,12 @@ async function prepareScannerStream(previewEl) {
     previewEl.onloadedmetadata = resolve;
   });
   await previewEl.play();
+  if (previewEl.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+    await Promise.race([
+      new Promise((resolve) => previewEl.addEventListener("canplay", resolve, { once: true })),
+      new Promise((resolve) => setTimeout(resolve, 1500))
+    ]);
+  }
 
   const track = stream.getVideoTracks()[0];
   const capabilities = track?.getCapabilities?.() || {};
@@ -1090,14 +1098,16 @@ async function scanWithBarcodeDetector(previewEl, timeoutMs = 4500) {
   const detector = new BarcodeDetector({ formats: BARCODE_FORMATS });
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
+    let codes = [];
     try {
-      const codes = await detector.detect(previewEl);
-      if (codes.length) return pickBestBarcode(codes);
-      const canvasCode = await detectBarcodeFromCanvas(previewEl, detector, 1);
-      if (canvasCode) return canvasCode;
-    } catch (error) {
-      return "";
+      codes = await detector.detect(previewEl);
+    } catch (_) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      continue;
     }
+    if (codes.length) return pickBestBarcode(codes);
+    const canvasCode = await detectBarcodeFromCanvas(previewEl, detector, 1);
+    if (canvasCode) return canvasCode;
     await new Promise((resolve) => requestAnimationFrame(resolve));
   }
   return "";
@@ -1113,8 +1123,9 @@ async function detectBarcodeFromPreview(previewEl, detector, tries = 4) {
 }
 
 async function detectBarcodeFromCanvas(previewEl, detector, tries = 3) {
-  const width = previewEl.videoWidth || 1920;
-  const height = previewEl.videoHeight || 1080;
+  const width = previewEl.videoWidth;
+  const height = previewEl.videoHeight;
+  if (!width || !height) return "";
   if (!_scanCanvas) {
     _scanCanvas = document.createElement("canvas");
     _scanCtx = _scanCanvas.getContext("2d", { willReadFrequently: true });
@@ -1133,8 +1144,8 @@ async function detectBarcodeFromCanvas(previewEl, detector, tries = 3) {
       _scanCtx.filter = "none";
       const codes = await detector.detect(_scanCanvas);
       if (codes.length) return pickBestBarcode(codes);
-    } catch (error) {
-      return "";
+    } catch (_) {
+      // continue to next attempt
     }
     await new Promise((resolve) => requestAnimationFrame(resolve));
   }
@@ -1145,20 +1156,22 @@ function tryZxingDecodeCanvas(reader, previewEl) {
   const width = previewEl.videoWidth;
   const height = previewEl.videoHeight;
   if (!width || !height) return "";
-  if (!_scanCanvas) {
-    _scanCanvas = document.createElement("canvas");
-    _scanCtx = _scanCanvas.getContext("2d", { willReadFrequently: true });
+  if (!_zxingCanvas) {
+    _zxingCanvas = document.createElement("canvas");
+    _zxingCtx = _zxingCanvas.getContext("2d", { willReadFrequently: true });
   }
-  if (_scanCanvas.width !== width) _scanCanvas.width = width;
-  if (_scanCanvas.height !== height) _scanCanvas.height = height;
-  for (const filter of ["contrast(1.4) brightness(1.05)", "contrast(1.7) brightness(1.1) saturate(0)"]) {
+  if (_zxingCanvas.width !== width) _zxingCanvas.width = width;
+  if (_zxingCanvas.height !== height) _zxingCanvas.height = height;
+  for (const filter of ["none", "contrast(1.4) brightness(1.05)", "contrast(1.7) brightness(1.1) saturate(0)"]) {
     try {
-      _scanCtx.filter = filter;
-      _scanCtx.drawImage(previewEl, 0, 0, width, height);
-      _scanCtx.filter = "none";
-      const r = reader.decodeFromCanvas?.(_scanCanvas) ?? reader.decode?.(_scanCanvas);
-      if (r) return normalizeScannedCode(r.getText());
-    } catch (e) { /* NotFoundException is expected */ }
+      _zxingCtx.filter = filter;
+      _zxingCtx.drawImage(previewEl, 0, 0, width, height);
+      _zxingCtx.filter = "none";
+    } catch (_) { continue; }
+    let r = null;
+    try { r = reader.decodeFromCanvas?.(_zxingCanvas) ?? null; } catch (_) {}
+    if (!r) { try { r = reader.decode?.(_zxingCanvas) ?? null; } catch (_) {} }
+    if (r) return normalizeScannedCode(r.getText());
   }
   return "";
 }
