@@ -1047,9 +1047,8 @@ function cameraConstraints() {
     audio: false,
     video: {
       facingMode: { ideal: "environment" },
-      width: { min: 1280, ideal: 1920 },
-      height: { min: 720, ideal: 1080 },
-      aspectRatio: { ideal: 16 / 9 },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
       frameRate: { ideal: 30, max: 60 }
     }
   };
@@ -1156,9 +1155,7 @@ async function watchContinuousBarcodeCandidate() {
       let code = "";
       try {
         const codes = await state.continuousScanDetector.detect(elements.scannerPreview);
-        code = codes.length
-          ? pickBestBarcode(codes)
-          : await detectBarcodeFromCanvas(elements.scannerPreview, state.continuousScanDetector, 1);
+        code = codes.length ? pickBestBarcode(codes) : "";
       } catch (error) {
         code = "";
       }
