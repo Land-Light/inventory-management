@@ -32,7 +32,8 @@ const state = {
   continuousCandidateHits: 0,
   continuousStableCode: "",
   continuousStableAt: 0,
-  continuousAnalyzerRunning: false
+  continuousBarcodeDetectorRunning: false,
+  continuousZxingRunning: false
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -1146,19 +1147,24 @@ function rememberContinuousCode(code) {
 }
 
 async function watchContinuousBarcodeCandidate() {
-  if (state.continuousAnalyzerRunning) return;
-  state.continuousAnalyzerRunning = true;
+  if (state.continuousBarcodeDetectorRunning) return;
+  state.continuousBarcodeDetectorRunning = true;
   try {
     while (state.continuousScanning && state.continuousScanDetector) {
-      const codes = await state.continuousScanDetector.detect(elements.scannerPreview);
-      const code = codes.length ? pickBestBarcode(codes) : "";
+      let code = "";
+      try {
+        const codes = await state.continuousScanDetector.detect(elements.scannerPreview);
+        code = codes.length ? pickBestBarcode(codes) : "";
+      } catch (error) {
+        code = "";
+      }
       rememberContinuousCode(code);
       await new Promise((resolve) => requestAnimationFrame(resolve));
     }
   } catch (error) {
     console.error("Continuous barcode watch failed", error);
   } finally {
-    state.continuousAnalyzerRunning = false;
+    state.continuousBarcodeDetectorRunning = false;
   }
 }
 
@@ -1167,11 +1173,15 @@ function watchContinuousBarcodeCandidateWithZxing() {
     showScanMessage(elements.scanMessage, "このSafariでは連続読取を開始できません。ブラウザを更新してもう一度試してください。");
     return;
   }
-  state.continuousAnalyzerRunning = true;
-  state.continuousZxingReader.decodeFromVideoElementContinuously(elements.scannerPreview, (result) => {
-    if (!state.continuousScanning || !result) return;
-    rememberContinuousCode(normalizeScannedCode(result.getText()));
-  });
+  state.continuousZxingRunning = true;
+  try {
+    state.continuousZxingReader.decodeFromVideoElementContinuously(elements.scannerPreview, (result) => {
+      if (!state.continuousScanning || !result) return;
+      rememberContinuousCode(normalizeScannedCode(result.getText()));
+    });
+  } catch (error) {
+    state.continuousZxingRunning = false;
+  }
 }
 
 async function waitForContinuousStableCode(timeoutMs = 700) {
@@ -1195,7 +1205,7 @@ function createZxingReader() {
     ]);
     hints.set(window.ZXing.DecodeHintType.TRY_HARDER, true);
   }
-  return new ZXing.BrowserMultiFormatReader(hints, 80);
+  return new ZXing.BrowserMultiFormatReader(hints, 40);
 }
 
 async function waitForZxing(timeoutMs = 2500) {
@@ -1238,8 +1248,8 @@ async function scanBarcodeToInput(targetInput, messageEl, previewEl, onCode) {
     showScanMessage(messageEl, "JANコードをカメラに向けてください。");
 
     stream = await prepareScannerStream(previewEl);
-    let code = await scanWithBarcodeDetector(previewEl);
-    if (!code) code = await scanWithZxing(previewEl);
+    let code = await scanWithZxing(previewEl, 9000);
+    if (!code) code = await scanWithBarcodeDetector(previewEl, 3500);
 
     if (code) {
       targetInput.value = code;
@@ -1292,6 +1302,8 @@ async function startContinuousCountScan() {
   state.continuousCandidateHits = 0;
   state.continuousStableCode = "";
   state.continuousStableAt = 0;
+  state.continuousBarcodeDetectorRunning = false;
+  state.continuousZxingRunning = false;
   elements.continuousScanButton.textContent = "連続読取停止";
   elements.continuousScanButton.classList.add("danger");
   elements.scanButton.disabled = true;
@@ -1339,7 +1351,12 @@ async function readContinuousCountScan() {
         rememberContinuousCode(code);
       }
       if (!code) {
-        showScanMessage(elements.scanMessage, "読み取れませんでした。JANを大きく映してもう一度押してください。");
+        elements.scannerPreview.hidden = false;
+        if (state.continuousScanStream && elements.scannerPreview.srcObject !== state.continuousScanStream) {
+          elements.scannerPreview.srcObject = state.continuousScanStream;
+          elements.scannerPreview.play().catch(() => null);
+        }
+        showScanMessage(elements.scanMessage, "読み取れませんでした。カメラは起動中です。JANを大きく映してもう一度押してください。");
         continue;
       }
       elements.countSearch.value = code;
@@ -1372,7 +1389,8 @@ function stopContinuousCountScan({ silent = false } = {}) {
   state.continuousCandidateHits = 0;
   state.continuousStableCode = "";
   state.continuousStableAt = 0;
-  state.continuousAnalyzerRunning = false;
+  state.continuousBarcodeDetectorRunning = false;
+  state.continuousZxingRunning = false;
   if (state.continuousScanStream) {
     state.continuousScanStream.getTracks().forEach((track) => track.stop());
     state.continuousScanStream = null;
