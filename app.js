@@ -1120,6 +1120,14 @@ function rememberContinuousCode(code) {
   }
 }
 
+function clearContinuousCandidate() {
+  state.continuousCandidateCode = "";
+  state.continuousCandidateHits = 0;
+  state.continuousCandidateAt = 0;
+  state.continuousStableCode = "";
+  state.continuousStableAt = 0;
+}
+
 async function watchContinuousBarcodeCandidate() {
   if (state.continuousBarcodeDetectorRunning) return;
   state.continuousBarcodeDetectorRunning = true;
@@ -1349,16 +1357,14 @@ async function readContinuousCountScan() {
       break;
     }
     try {
-      let code = state.continuousStableCode || recentContinuousCandidate() || await waitForContinuousStableCode();
+      clearContinuousCandidate();
+      let code = await waitForContinuousStableCode(250);
       if (!code && state.continuousScanDetector) {
         code = await detectContinuousCodeWithBarcodeDetector();
       }
       if (!code && "BarcodeDetector" in window) {
         showScanMessage(elements.scanMessage, "読み取り中です。JANを画面内に大きく映したまま待ってください。");
         code = await scanWithBarcodeDetector(elements.scannerPreview, 6000);
-      }
-      if (!code && state.continuousZxingReader) {
-        code = recentContinuousCandidate(5000);
       }
       if (!code && state.continuousZxingReader) {
         showScanMessage(elements.scanMessage, "読み取り中です。JANを画面内に大きく映したまま待ってください。");
