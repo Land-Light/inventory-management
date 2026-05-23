@@ -30,6 +30,7 @@ const state = {
   continuousReadCount: 0,
   continuousCandidateCode: "",
   continuousCandidateHits: 0,
+  continuousCandidateAt: 0,
   continuousStableCode: "",
   continuousStableAt: 0,
   continuousBarcodeDetectorRunning: false,
@@ -1078,10 +1079,10 @@ async function prepareScannerStream(previewEl) {
   return stream;
 }
 
-async function scanWithBarcodeDetector(previewEl) {
+async function scanWithBarcodeDetector(previewEl, timeoutMs = 15000) {
   const detector = new BarcodeDetector({ formats: BARCODE_FORMATS });
   const startedAt = Date.now();
-  while (Date.now() - startedAt < 15000) {
+  while (Date.now() - startedAt < timeoutMs) {
     const codes = await detector.detect(previewEl);
     if (codes.length) return pickBestBarcode(codes);
     await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -1106,6 +1107,7 @@ async function detectContinuousCodeWithBarcodeDetector() {
 
 function rememberContinuousCode(code) {
   if (!code) return;
+  state.continuousCandidateAt = Date.now();
   if (code === state.continuousCandidateCode) {
     state.continuousCandidateHits += 1;
   } else {
@@ -1162,6 +1164,11 @@ async function waitForContinuousStableCode(timeoutMs = 700) {
     await new Promise((resolve) => requestAnimationFrame(resolve));
   }
   return state.continuousStableCode;
+}
+
+function recentContinuousCandidate(maxAgeMs = 1800) {
+  if (!state.continuousCandidateCode) return "";
+  return Date.now() - state.continuousCandidateAt <= maxAgeMs ? state.continuousCandidateCode : "";
 }
 
 function createZxingReader() {
@@ -1263,6 +1270,7 @@ async function startContinuousCountScan() {
   state.continuousReadCount = 0;
   state.continuousCandidateCode = "";
   state.continuousCandidateHits = 0;
+  state.continuousCandidateAt = 0;
   state.continuousStableCode = "";
   state.continuousStableAt = 0;
   state.continuousBarcodeDetectorRunning = false;
@@ -1306,9 +1314,16 @@ async function readContinuousCountScan() {
       break;
     }
     try {
-      let code = state.continuousStableCode || await waitForContinuousStableCode();
+      let code = state.continuousStableCode || recentContinuousCandidate() || await waitForContinuousStableCode();
       if (!code && state.continuousScanDetector) {
         code = await detectContinuousCodeWithBarcodeDetector();
+      }
+      if (!code && "BarcodeDetector" in window) {
+        showScanMessage(elements.scanMessage, "読み取り中です。JANを画面内に大きく映したまま待ってください。");
+        code = await scanWithBarcodeDetector(elements.scannerPreview, 6000);
+      }
+      if (!code && state.continuousZxingReader) {
+        code = recentContinuousCandidate(5000);
       }
       if (code) {
         rememberContinuousCode(code);
@@ -1350,6 +1365,7 @@ function stopContinuousCountScan({ silent = false } = {}) {
   }
   state.continuousCandidateCode = "";
   state.continuousCandidateHits = 0;
+  state.continuousCandidateAt = 0;
   state.continuousStableCode = "";
   state.continuousStableAt = 0;
   state.continuousBarcodeDetectorRunning = false;
