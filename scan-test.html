@@ -151,8 +151,20 @@
         const canvas = drawBarcodeCanvas(TEST_JAN);
         try {
           let result = null;
-          if (reader.decodeFromCanvas) result = reader.decodeFromCanvas(canvas);
-          if (!result && reader.decode) result = reader.decode(canvas);
+          const image = new Image();
+          image.alt = "self test barcode";
+          image.style.position = "fixed";
+          image.style.left = "-10000px";
+          image.style.top = "0";
+          image.src = canvas.toDataURL("image/png");
+          document.body.appendChild(image);
+          await new Promise((resolve, reject) => {
+            image.onload = resolve;
+            image.onerror = reject;
+          });
+          if (reader.decodeFromImageElement) result = await reader.decodeFromImageElement(image);
+          if (!result && reader.decodeFromImage) result = await reader.decodeFromImage(image);
+          image.remove();
           const code = result ? result.getText() : "";
           el.textContent = code === TEST_JAN
             ? `画像セルフテスト成功: ${code}`
