@@ -27,6 +27,7 @@
           <a href="index.html" class="file-button">アプリへ戻る</a>
         </div>
         <p id="testMessage" class="notice" hidden></p>
+        <p id="selfTestMessage" class="notice" hidden></p>
         <video id="testPreview" class="test-video" muted playsinline hidden></video>
         <div id="diag" class="diag"></div>
       </section>
@@ -74,6 +75,26 @@
         svg.insertAdjacentHTML("beforeend", `<text x="${width / 2}" y="${height - 8}" text-anchor="middle" font-family="monospace" font-size="22" fill="black">${value}</text>`);
       }
 
+      function drawBarcodeCanvas(value) {
+        const bits = ean13Bits(value);
+        const module = 4;
+        const quiet = 24;
+        const barHeight = 180;
+        const width = bits.length * module + quiet * 2;
+        const height = barHeight + 40;
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, width, height);
+        ctx.fillStyle = "#000";
+        [...bits].forEach((bit, index) => {
+          if (bit === "1") ctx.fillRect(quiet + index * module, 8, module, barHeight);
+        });
+        return canvas;
+      }
+
       function show(message) {
         const el = $("testMessage");
         el.hidden = false;
@@ -115,6 +136,34 @@
         }
       }
 
+      async function runSelfTest() {
+        const el = $("selfTestMessage");
+        el.hidden = false;
+        const startedAt = Date.now();
+        while (!window.ZXing?.BrowserMultiFormatReader && Date.now() - startedAt < 3000) {
+          await new Promise((resolve) => setTimeout(resolve, 80));
+        }
+        if (!window.ZXing?.BrowserMultiFormatReader) {
+          el.textContent = "画像セルフテスト: ZXingを読み込めませんでした。";
+          return;
+        }
+        const reader = new ZXing.BrowserMultiFormatReader();
+        const canvas = drawBarcodeCanvas(TEST_JAN);
+        try {
+          let result = null;
+          if (reader.decodeFromCanvas) result = reader.decodeFromCanvas(canvas);
+          if (!result && reader.decode) result = reader.decode(canvas);
+          const code = result ? result.getText() : "";
+          el.textContent = code === TEST_JAN
+            ? `画像セルフテスト成功: ${code}`
+            : `画像セルフテスト失敗: ${code || "読取なし"}`;
+        } catch (error) {
+          el.textContent = `画像セルフテスト失敗: ${error.message || "読取エラー"}`;
+        } finally {
+          reader.reset();
+        }
+      }
+
       async function cameraTest() {
         const video = $("testPreview");
         let stream;
@@ -143,7 +192,10 @@
       }
 
       renderBarcode(TEST_JAN);
-      window.addEventListener("load", diagnostics);
+      window.addEventListener("load", () => {
+        diagnostics();
+        runSelfTest();
+      });
       $("cameraTest").addEventListener("click", cameraTest);
     </script>
   </body>
