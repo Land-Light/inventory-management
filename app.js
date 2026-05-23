@@ -1289,8 +1289,7 @@ async function startContinuousCountScan() {
     if (canUseBarcodeDetector) {
       state.continuousScanDetector = new BarcodeDetector({ formats: BARCODE_FORMATS });
       watchContinuousBarcodeCandidate();
-    }
-    if (canUseZxing) {
+    } else if (canUseZxing) {
       state.continuousZxingReader = createZxingReader();
       watchContinuousBarcodeCandidateWithZxing();
     }
