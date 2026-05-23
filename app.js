@@ -1202,6 +1202,42 @@ async function scanWithZxing(previewEl, timeoutMs = 10000) {
   }
 }
 
+async function scanCurrentVideoFrameWithZxing(previewEl, timeoutMs = 2200) {
+  if (!(await waitForZxing()) || !previewEl.videoWidth || !previewEl.videoHeight) return "";
+  const reader = createZxingReader();
+  if (!reader) return "";
+  const canvas = document.createElement("canvas");
+  canvas.width = previewEl.videoWidth;
+  canvas.height = previewEl.videoHeight;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  const startedAt = Date.now();
+
+  try {
+    while (Date.now() - startedAt < timeoutMs) {
+      context.drawImage(previewEl, 0, 0, canvas.width, canvas.height);
+      const image = new Image();
+      image.alt = "barcode frame";
+      image.style.position = "fixed";
+      image.style.left = "-9999px";
+      image.src = canvas.toDataURL("image/png");
+      document.body.appendChild(image);
+      try {
+        if (image.decode) await image.decode();
+        const result = await reader.decodeFromImageElement(image);
+        if (result) return normalizeScannedCode(result.getText());
+      } catch (error) {
+        // Try the next camera frame.
+      } finally {
+        image.remove();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+    return "";
+  } finally {
+    reader.reset();
+  }
+}
+
 async function scanBarcodeToInput(targetInput, messageEl, previewEl, onCode) {
   let stream;
   try {
@@ -1323,6 +1359,10 @@ async function readContinuousCountScan() {
       }
       if (!code && state.continuousZxingReader) {
         code = recentContinuousCandidate(5000);
+      }
+      if (!code && state.continuousZxingReader) {
+        showScanMessage(elements.scanMessage, "読み取り中です。JANを画面内に大きく映したまま待ってください。");
+        code = await scanCurrentVideoFrameWithZxing(elements.scannerPreview);
       }
       if (code) {
         rememberContinuousCode(code);
