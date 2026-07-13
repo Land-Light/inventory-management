@@ -1,21 +1,23 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="ja">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="部屋コードで複数端末から共有できる棚卸Webアプリ">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="description" content="部屋コードで複数端末からリアルタイム共有できる棚卸Webアプリ">
+    <meta name="theme-color" content="#1f7a5b">
     <title>棚卸アプリ</title>
-    <link rel="stylesheet" href="styles.css?v=20260523-2">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%231f7a5b'/%3E%3Cg fill='%23fff'%3E%3Crect x='22' y='25' width='8' height='50'/%3E%3Crect x='36' y='25' width='5' height='50'/%3E%3Crect x='47' y='25' width='10' height='50'/%3E%3Crect x='63' y='25' width='5' height='50'/%3E%3Crect x='73' y='25' width='8' height='50'/%3E%3C/g%3E%3C/svg%3E">
+    <link rel="stylesheet" href="styles.css?v=20260713-1">
   </head>
   <body>
     <div id="lockScreen" class="lock-screen">
       <main class="login-panel" aria-labelledby="loginTitle">
         <p class="eyebrow">Inventory Count</p>
         <h1 id="loginTitle">棚卸アプリ</h1>
-        <p class="lead">部屋を作って、コードかリンクを共有すると複数端末で同じ棚卸を入力できます。</p>
+        <p class="lead">部屋を作って、コードかリンクを共有すると複数端末で同じ棚卸をリアルタイムに入力できます。</p>
 
         <div id="cloudSetupNotice" class="notice warning" hidden>
-          端末間同期を使うには、supabase-config.js に Supabase の URL と anon key を設定してください。
+          端末間同期を使うには、firebase-config.js に Firebase の設定を貼り付けてください。設定するまではこの端末だけで動きます。
         </div>
 
         <form id="joinForm" class="login-form">
@@ -44,6 +46,7 @@
             <span id="activeRoomCode" class="pill">部屋 -</span>
             <span id="activeUserName" class="pill muted">担当 -</span>
             <span id="syncStatus" class="pill muted">未接続</span>
+            <span id="roomExpiry" class="pill muted" hidden>期限 -</span>
           </div>
         </div>
         <div class="header-actions">
@@ -91,13 +94,12 @@
             <button type="submit">登録</button>
           </form>
 
-          <p id="productScanMessage" class="notice" hidden></p>
-          <video id="productScannerPreview" class="scanner-preview" muted playsinline hidden></video>
+          <p id="productMessage" class="notice" hidden></p>
 
           <div class="import-row">
             <label id="csvImportButton" for="csvImport" class="file-button">CSV取込</label>
             <input id="csvImport" type="file" accept=".csv,text/csv">
-            <p>列名は <code>jan</code>, <code>name</code>, <code>expected</code> に対応しています。</p>
+            <p>列名は <code>jan</code>, <code>name</code>, <code>expected</code>(日本語列名にも対応)。</p>
           </div>
 
           <div class="table-wrap">
@@ -118,7 +120,10 @@
         <section id="count" class="tab-panel" aria-labelledby="countTitle">
           <div class="section-heading">
             <h2 id="countTitle">数量入力</h2>
-            <span id="countTotal" class="pill">0点</span>
+            <div class="heading-actions">
+              <button id="undoButton" type="button" class="ghost" disabled>直前取消</button>
+              <span id="countTotal" class="pill">0点</span>
+            </div>
           </div>
 
           <form id="countForm" class="count-panel">
@@ -136,20 +141,12 @@
               <input id="countQty" type="number" min="1" step="1" value="1" required>
             </label>
             <button type="button" id="scanButton" class="secondary">カメラ読取</button>
-            <button type="button" id="continuousScanButton" class="ghost">連続読取</button>
+            <button type="button" id="autoScanButton" class="scan-cta">連続スキャン</button>
             <button type="button" id="takeoverEntryButton" class="ghost">引継ぎ</button>
             <button id="countSubmit" type="submit">加算</button>
           </form>
 
           <p id="scanMessage" class="notice" hidden></p>
-          <video id="countScannerPreview" class="scanner-preview count-scanner-preview" muted playsinline hidden></video>
-          <div id="continuousScannerStage" class="continuous-scanner-stage" hidden>
-            <video id="scannerPreview" class="scanner-preview" muted playsinline hidden></video>
-            <div id="continuousScanControls" class="continuous-scan-controls" hidden>
-              <button type="button" id="continuousReadButton" class="continuous-read-button">読取</button>
-              <button type="button" id="continuousStopButton" class="ghost">停止</button>
-            </div>
-          </div>
 
           <div id="selectedProduct" class="selected-product" hidden></div>
 
@@ -178,6 +175,14 @@
               <span id="shortTotal">不足 0</span>
               <span id="overTotal">過剰 0</span>
             </div>
+          </div>
+
+          <div class="progress-card">
+            <div class="progress-row">
+              <span id="progressText">進捗 0 / 0 SKU (0%)</span>
+              <span id="progressQty">入力 0点 / 予定 0点</span>
+            </div>
+            <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
           </div>
 
           <div class="review-tools">
@@ -228,11 +233,38 @@
       </main>
     </div>
 
-    <script src="supabase-config.js"></script>
-    <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js" defer></script>
-    <script src="app.js?v=20260523-4" defer></script>
+    <div id="scanStage" class="scan-stage" hidden>
+      <div class="scan-topbar">
+        <span id="scanModeLabel" class="scan-mode">連続スキャン</span>
+        <span id="scanEngine" class="scan-engine"></span>
+        <button id="scanStop" type="button" class="scan-close">終了</button>
+      </div>
+      <div class="scan-viewport">
+        <video id="scanVideo" muted playsinline></video>
+        <div class="scan-mask" aria-hidden="true">
+          <div class="scan-window"><div class="scan-line"></div></div>
+        </div>
+        <div id="scanFlash" class="scan-flash" aria-hidden="true"></div>
+        <div id="scanLast" class="scan-last" hidden></div>
+      </div>
+      <p id="scanStageMessage" class="scan-message">カメラを起動しています…</p>
+      <div class="scan-bottom">
+        <label class="scan-shelf" id="scanShelfField">
+          棚番
+          <input id="scanShelf" maxlength="20" placeholder="001 / A-1" autocomplete="off">
+        </label>
+        <div class="scan-buttons">
+          <button id="torchButton" type="button" class="ghost-dark" hidden>ライト</button>
+          <button id="scanUndo" type="button" class="ghost-dark" hidden>直前取消</button>
+        </div>
+        <label class="scan-zoom" id="zoomControl" hidden>
+          ズーム
+          <input id="zoomRange" type="range">
+        </label>
+      </div>
+    </div>
+
+    <script src="firebase-config.js"></script>
+    <script type="module" src="js/app.js?v=20260713-1"></script>
   </body>
 </html>
-
-
-

@@ -66,6 +66,11 @@ button.ghost {
   border: 1px solid var(--line);
 }
 
+button.scan-cta {
+  background: #14532d;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.18);
+}
+
 input {
   width: 100%;
   border: 1px solid var(--line);
@@ -88,9 +93,7 @@ label {
   display: grid;
   place-items: center;
   padding: 24px;
-  background:
-    linear-gradient(rgba(245, 247, 244, 0.88), rgba(245, 247, 244, 0.96)),
-    url("https://images.unsplash.com/photo-1553413077-190dd305871c?auto=format&fit=crop&w=1600&q=80") center/cover;
+  background: linear-gradient(160deg, #eef4f0, #dfeae3 55%, #d3e3da);
 }
 
 .login-panel {
@@ -107,7 +110,6 @@ label {
   color: var(--accent);
   font-size: 0.76rem;
   font-weight: 800;
-  letter-spacing: 0;
   text-transform: uppercase;
 }
 
@@ -152,7 +154,8 @@ h2 {
 
 .header-actions,
 .room-meta,
-.summary-strip {
+.summary-strip,
+.heading-actions {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -256,6 +259,39 @@ h2 {
   color: var(--warn);
 }
 
+.progress-card {
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8faf8;
+}
+
+.progress-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  font-weight: 700;
+  color: var(--accent-dark);
+}
+
+.progress-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: #e2e9e3;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), #2f9d77);
+  transition: width 0.4s ease;
+}
+
 .form-grid,
 .count-panel {
   display: grid;
@@ -265,7 +301,7 @@ h2 {
 }
 
 .count-panel {
-  grid-template-columns: 1.7fr 0.45fr 0.45fr auto auto auto;
+  grid-template-columns: 1.7fr 0.45fr 0.45fr auto auto auto auto;
 }
 
 .review-tools {
@@ -371,7 +407,6 @@ th {
   color: var(--muted);
   font-size: 0.78rem;
   text-transform: uppercase;
-  letter-spacing: 0;
 }
 
 tbody tr:last-child td {
@@ -421,147 +456,6 @@ tbody tr:last-child td {
   margin: 18px 0;
 }
 
-.scanner-preview {
-  width: min(520px, 100%);
-  aspect-ratio: 4 / 3;
-  object-fit: cover;
-  border-radius: 8px;
-  background: #111;
-  margin: 14px 0;
-}
-
-.count-scanner-preview {
-  width: min(640px, 100%);
-}
-
-.continuous-scanner-stage {
-  width: min(520px, 100%);
-}
-
-.continuous-scan-controls {
-  position: sticky;
-  bottom: 10px;
-  z-index: 10;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  width: min(520px, 100%);
-  margin: 10px 0 18px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 10px 28px rgba(31, 43, 37, 0.16);
-}
-
-.continuous-read-button {
-  min-height: 72px;
-  font-size: 1.2rem;
-}
-
-.continuous-scan-controls .ghost {
-  min-width: 84px;
-}
-
-body.continuous-scan-active {
-  overflow: hidden;
-}
-
-body.continuous-scan-active .app-header,
-body.continuous-scan-active .tabs,
-body.continuous-scan-active #countTitle,
-body.continuous-scan-active #countTotal,
-body.continuous-scan-active #countForm,
-body.continuous-scan-active #selectedProduct,
-body.continuous-scan-active #count .table-wrap {
-  display: none !important;
-}
-
-body.continuous-scan-active .app-shell {
-  display: block;
-  min-height: 100vh;
-  padding: 0;
-}
-
-body.continuous-scan-active main {
-  max-width: none;
-  padding: 0;
-}
-
-body.continuous-scan-active .tab-panel {
-  display: none;
-}
-
-body.continuous-scan-active #count.tab-panel {
-  display: grid;
-  grid-template-rows: auto 1fr;
-  min-height: 100vh;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: #050806;
-}
-
-body.continuous-scan-active #scanMessage {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 70;
-  margin: 0;
-  border-radius: 0;
-  background: rgba(5, 8, 6, 0.82);
-  color: #fff;
-}
-
-body.continuous-scan-active .continuous-scanner-stage {
-  position: fixed;
-  inset: 0;
-  z-index: 30;
-  display: block;
-  width: 100%;
-  min-height: 100vh;
-  min-height: 100dvh;
-  background: #050806;
-}
-
-body.continuous-scan-active .scanner-preview {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  width: 100%;
-  height: 100%;
-  height: 100dvh;
-  min-height: 0;
-  aspect-ratio: auto;
-  margin: 0;
-  border-radius: 0;
-  object-fit: cover;
-}
-
-body.continuous-scan-active .continuous-scan-controls {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 80;
-  display: grid;
-  width: 100%;
-  margin: 0;
-  padding: 12px 12px max(12px, env(safe-area-inset-bottom));
-  border: 0;
-  border-radius: 0;
-  grid-template-columns: minmax(0, 1fr) 96px;
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.24);
-  transform: translateZ(0);
-}
-
-body.continuous-scan-active .continuous-read-button {
-  min-height: 86px;
-  font-size: 1.35rem;
-}
-
 .empty {
   color: var(--muted);
   text-align: center;
@@ -582,6 +476,188 @@ body.continuous-scan-active .continuous-read-button {
   display: block;
   color: var(--ink);
   line-height: 1.45;
+}
+
+/* ---------- スキャン画面 ---------- */
+
+body.scan-active {
+  overflow: hidden;
+}
+
+.scan-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  background: #050806;
+  color: #f2f6f3;
+}
+
+.scan-topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  padding-top: max(10px, env(safe-area-inset-top));
+  background: rgba(5, 8, 6, 0.9);
+}
+
+.scan-mode {
+  font-weight: 800;
+}
+
+.scan-engine {
+  font-size: 0.78rem;
+  color: #9fc3b2;
+  border: 1px solid #2c463a;
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+
+.scan-close {
+  margin-left: auto;
+  background: #b63b3b;
+  min-height: 40px;
+}
+
+.scan-viewport {
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.scan-viewport video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+
+.scan-mask {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* 読取窓: 外側はbox-shadowで暗くする(scanner.jsのROIと同じ中央帯) */
+.scan-window {
+  position: absolute;
+  inset: 25% 3%;
+  border: 2px solid rgba(126, 232, 187, 0.9);
+  border-radius: 12px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+}
+
+.scan-line {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 0;
+  height: 2px;
+  background: rgba(126, 232, 187, 0.85);
+  box-shadow: 0 0 12px rgba(126, 232, 187, 0.9);
+  animation: scanline 1.6s ease-in-out infinite alternate;
+}
+
+@keyframes scanline {
+  from { top: 4%; }
+  to { top: 94%; }
+}
+
+.scan-flash {
+  position: absolute;
+  inset: 0;
+  background: rgba(126, 232, 187, 0.35);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.scan-flash.active {
+  animation: scanflash 0.28s ease-out;
+}
+
+@keyframes scanflash {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.scan-last {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(5, 8, 6, 0.82);
+  border: 1px solid #2c463a;
+  color: #d9f2e5;
+  font-weight: 700;
+}
+
+.scan-message {
+  margin: 0;
+  padding: 10px 14px;
+  background: rgba(5, 8, 6, 0.94);
+  color: #cfe0d6;
+  font-size: 0.92rem;
+}
+
+.scan-bottom {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto auto;
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  background: rgba(5, 8, 6, 0.94);
+}
+
+.scan-shelf {
+  color: #9fc3b2;
+}
+
+.scan-shelf input {
+  background: #10201a;
+  border-color: #2c463a;
+  color: #f2f6f3;
+  font-size: 1.05rem;
+}
+
+.scan-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.ghost-dark {
+  background: transparent;
+  color: #d9f2e5;
+  border: 1px solid #2c463a;
+}
+
+.ghost-dark:hover {
+  background: #14251d;
+}
+
+.ghost-dark.active {
+  background: #1f7a5b;
+  border-color: #1f7a5b;
+}
+
+.scan-zoom {
+  color: #9fc3b2;
+  min-width: 120px;
+}
+
+.scan-zoom input {
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  accent-color: #7ee8bb;
 }
 
 @media (max-width: 780px) {
@@ -615,5 +691,14 @@ body.continuous-scan-active .continuous-read-button {
 
   table {
     min-width: 620px;
+  }
+
+  .scan-bottom {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .scan-buttons button {
+    flex: 1;
   }
 }
